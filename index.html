@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Сцена из Blender</title>
+  <style>body { margin: 0; background: #05070c; }</style>
+</head>
+<body>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+//сцена, камера
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 2000);
+camera.position.set(0, 20, 30);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+new OrbitControls(camera, renderer.domElement);
+
+//свет
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+scene.add(new THREE.PointLight(0xffffff, 900, 0, 2));
+
+//фон
+let bgTexture = null;
+
+new THREE.TextureLoader().load(
+    "space.jpg",
+    function (texture) {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.center.set(0.5, 0.5);
+
+        bgTexture = texture;
+        scene.background = texture;
+        scene.backgroundIntensity = 0.8;
+
+        fitBackground();
+
+        console.log("фон:", texture.image.width, "на", texture.image.height);
+    },
+    undefined,
+    function () {
+        console.log("space.jpg не найден — фон остаётся чёрным");
+    }
+);
+
+function fitBackground() {
+    if (!bgTexture || !bgTexture.image) return;
+
+    const imageAspect = bgTexture.image.width / bgTexture.image.height;
+    const screenAspect = innerWidth / innerHeight;
+    if (screenAspect > imageAspect) {
+        const k = imageAspect / screenAspect;
+        bgTexture.repeat.set(1, k);
+        bgTexture.offset.set(0, (1 - k) / 2);
+    } else {
+        const k = screenAspect / imageAspect;
+        bgTexture.repeat.set(k, 1);
+        bgTexture.offset.set((1 - k) / 2, 0);
+    }
+}
+
+//свечение звезды 
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloom = new UnrealBloomPass(
+    new THREE.Vector2(innerWidth, innerHeight),
+    0.5,    //сила свечения
+    0.2,    // радиус растекания
+    1.0     
+);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+//загрузка сцены
+let mixer = null;
+const clock = new THREE.Clock();
+
+new GLTFLoader().load("scene.glb", function (gltf) {
+    scene.add(gltf.scene);
+
+    const star = gltf.scene.getObjectByName("Sun");
+    if (star) {
+        star.material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(3, 2.0, 0.6)
+        });
+    }
+
+    if (gltf.animations.length > 0) {
+        mixer = new THREE.AnimationMixer(gltf.scene);
+        gltf.animations.forEach(clip => mixer.clipAction(clip).play());
+    }
+});
+
+function animate() {
+    requestAnimationFrame(animate);
+    if (mixer) mixer.update(clock.getDelta());
+    composer.render();
+}
+animate();
+
+addEventListener("resize", () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
+    fitBackground();
+});
+</script>
+</body>
+</html>
